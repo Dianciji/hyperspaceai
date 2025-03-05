@@ -23,7 +23,7 @@
 打开终端，输入以下命令下载脚本：
 
 ```bash
-wget https://raw.githubusercontent.com/你的用户名/hyperspace-tool/main/hyai.py
+wget https://github.com/Dianciji/hyperspaceai.git
 ```
 
 > 注意：请将"你的用户名"替换为实际的GitHub用户名
