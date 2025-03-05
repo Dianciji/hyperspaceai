@@ -31,19 +31,19 @@ wget https://github.com/Dianciji/hyperspaceai.git
 ### 2. 添加执行权限
 
 ```bash
-chmod +x hyai.py
+chmod +x hyperspaceai.py
 ```
 
 ### 3. 运行脚本
 
 ```bash
-./hyai.py
+./hyperspaceai.py
 ```
 
 或者
 
 ```bash
-python3 hyai.py
+python3 hyperspaceai.py
 ```
 
 ### 4. 使用菜单选项
