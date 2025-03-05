@@ -1,248 +1,413 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-import subprocess
-import sys
 import os
-import glob
+import subprocess
+import time
+import sys
 
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
 
-def run_command(command):
-    """执行系统命令并返回结果"""
+def run_command(command, shell=True):
+    """执行命令并返回输出和状态码"""
     try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        if result.returncode == 0:
-            print(f"成功: {result.stdout}")
+        result = subprocess.run(command, shell=shell, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return result.stdout, result.stderr, result.returncode
+    except Exception as e:
+        return "", str(e), 1
+
+def check_ipv6():
+    """检查 IPv6 是否开启"""
+    print("第一步: 检查 IPv6 是否开启...")
+    stdout, stderr, code = run_command("cat /proc/sys/net/ipv6/conf/all/disable_ipv6")
+    
+    if code != 0:
+        print("无法检查 IPv6 状态，错误信息:", stderr)
+        return False
+    
+    if stdout.strip() == "0":
+        print("IPv6 已开启，继续下一步...")
+        return True
+    else:
+        print("IPv6 未开启，正在自动配置...")
+        
+        # 自动修改 sysctl.conf 文件
+        config_lines = [
+            "net.ipv6.conf.default.disable_ipv6=0",
+            "net.ipv6.conf.all.disable_ipv6=0"
+        ]
+        
+        try:
+            # 使用 echo 命令添加配置
+            for line in config_lines:
+                run_command(f'echo "{line}" | sudo tee -a /etc/sysctl.conf')
+            
+            # 应用新配置
+            run_command("sudo sysctl -p")
+            
+            # 再次检查 IPv6 状态
+            stdout, stderr, code = run_command("cat /proc/sys/net/ipv6/conf/all/disable_ipv6")
+            if stdout.strip() == "0":
+                print("IPv6 已成功开启，继续下一步...")
+                return True
+            else:
+                print("IPv6 启用失败，请检查系统配置。")
+                return False
+                
+        except Exception as e:
+            print(f"配置 IPv6 时发生错误: {e}")
+            return False
+
+def update_packages():
+    """更新软件包"""
+    print("\n第二步: 更新软件包...")
+    stdout, stderr, code = run_command("sudo apt update")
+    if code == 0:
+        print("软件包更新成功！")
+        return True
+    else:
+        print("软件包更新失败，错误信息:", stderr)
+        return False
+
+def install_screen():
+    """安装 screen"""
+    print("\n第三步: 安装 screen...")
+    stdout, stderr, code = run_command("sudo apt install -y screen")
+    if code == 0:
+        print("screen 安装成功！")
+        return True
+    else:
+        print("screen 安装失败，错误信息:", stderr)
+        return False
+
+def install_hyperspace():
+    """安装 hyperspace"""
+    print("\n第四步: 安装 hyperspace...")
+    stdout, stderr, code = run_command("curl https://download.hyper.space/api/install | bash")
+    if code == 0:
+        print("hyperspace 安装成功！")
+        return True
+    else:
+        print("hyperspace 安装失败，错误信息:", stderr)
+        return False
+
+def source_bashrc():
+    """执行 source /root/.bashrc"""
+    print("\n第五步: 加载环境变量...")
+    # 由于 source 是 shell 内置命令，我们需要特殊处理
+    stdout, stderr, code = run_command("bash -c 'source /root/.bashrc && echo 环境变量加载成功'")
+    if "环境变量加载成功" in stdout:
+        print("环境变量加载成功！")
+        return True
+    else:
+        print("环境变量加载失败，错误信息:", stderr)
+        return False
+
+def start_screen_session():
+    """启动 screen 会话"""
+    print("\n第六步: 启动 screen 会话...")
+    
+    # 检查并清理现有的 hyperspace 会话
+    print("检查并清理现有 'hyperspace' 会话...")
+    stdout, stderr, code = run_command("screen -ls | grep hyperspace")
+    
+    if stdout:
+        print("发现现有 hyperspace 会话，正在清理...")
+        # 先分离所有 Attached 会话
+        run_command("screen -ls | grep 'hyperspace' | grep 'Attached' | awk '{print $1}' | xargs -I{} screen -S {} -d")
+        # 再终止所有 hyperspace 会话
+        run_command("screen -ls | grep 'hyperspace' | awk '{print $1}' | xargs -I{} screen -S {} -X quit")
+    else:
+        print("未发现现有 hyperspace 会话")
+    
+    # 启动新的 screen 会话（后台运行）
+    stdout, stderr, code = run_command("screen -S hyperspace -d -m")
+    
+    if code == 0:
+        print("screen 会话已在后台启动！")
+        return True
+    else:
+        print("screen 会话启动失败，错误信息:", stderr)
+        return False
+
+def start_aios_cli():
+    """启动 aios-cli"""
+    print("\n第七步: 启动 aios-cli...")
+    
+    # 检查 aios-cli 是否已安装
+    stdout, stderr, code = run_command("command -v aios-cli")
+    if code != 0:
+        print("错误：aios-cli 未安装，请确保步骤 4 已正确执行")
+        return False
+    
+    # 在 screen 会话中执行 aios-cli start
+    stdout, stderr, code = run_command("screen -S hyperspace -X stuff 'aios-cli start\n'")
+    
+    if code == 0:
+        print("aios-cli start 命令已发送到 screen 会话")
+        print("等待 aios-cli 启动（5秒）...")
+        time.sleep(5)
+        
+        # 检查 aios-cli 是否成功启动
+        stdout, stderr, code = run_command("screen -S hyperspace -X hardcopy -h /tmp/screenlog")
+        if code == 0:
+            stdout, stderr, code = run_command("cat /tmp/screenlog")
+            if "Checked for auto-update" in stdout or "already running" in stdout:
+                print("aios-cli 启动成功！")
+                return True
+        
+        # 如果无法自动检测，询问用户
+        success = input("无法自动确认 aios-cli 是否启动成功，请手动确认 (y/n): ").lower() == 'y'
+        if success:
+            print("aios-cli 启动成功！")
             return True
         else:
-            print(f"失败: {result.stderr}")
+            print("aios-cli 启动失败！")
+            return False
+    else:
+        print("向 screen 会话发送命令失败，错误信息:", stderr)
+        return False
+
+
+def download_model():
+    """下载模型"""
+    print("\n第八步: 下载模型...")
+    print("正在下载模型，请稍候...")
+    
+    # 使用 os.system 直接执行命令，这样输出会直接显示在控制台上
+    try:
+        # 直接执行命令，所有输出（包括进度条）都会显示在控制台
+        return_code = os.system("aios-cli models add hf:TheBloke/phi-2-GGUF:phi-2.Q4_K_M.gguf")
+        
+        if return_code == 0:
+            print("模型下载成功！")
+            return True
+        else:
+            print("模型下载失败，返回码:", return_code)
             return False
     except Exception as e:
-        print(f"异常: {str(e)}")
+        print(f"下载模型时发生错误: {e}")
         return False
-def save_to_pem(content, filename="my.pem"):
-    """将用户输入的字符串保存为 my.pem 文件"""
-    try:
-        with open(filename, "w") as f:
-            f.write(content)
-        print(f"已保存为 {filename}")
-        if os.path.exists(filename):
-            print(f"文件路径: {os.path.abspath(filename)}")
-        else:
-            print("保存失败，未知错误")
-    except Exception as e:
-        print(f"保存文件时出错: {str(e)}")
+    
+def hive_login():
+    """登录 hive"""
+    print("\n第十步: 登录 hive...")
+    stdout, stderr, code = run_command("aios-cli hive login")
+    if code == 0 and "successful" in stdout.lower():
+        print("hive 登录成功！")
+        return True
+    else:
+        print("hive 登录失败，错误信息:", stderr)
+        print("输出:", stdout)
+        return False
 
+def hive_connect():
+    """连接 hive"""
+    print("\n第十一步: 连接 hive...")
+    stdout, stderr, code = run_command("aios-cli hive connect")
+    if code == 0 and "successful" in stdout.lower():
+        print("hive 连接成功！")
+        return True
+    else:
+        print("hive 连接失败，错误信息:", stderr)
+        print("输出:", stdout)
+        return False
 
-def view_latest_log(log_dir="~/.cache/hyperspace/kernel-logs"):
-    """查看最近的日志文件"""
-    # 解析用户主目录
-    log_dir = os.path.expanduser(log_dir)
+def select_tier():
+    """选择 tier"""
+    print("\n第十二步: 自动选择 tier...")
+    stdout, stderr, code = run_command("aios-cli hive select-tier 5")
+    if code == 0 and "successful" in stdout.lower():
+        print("tier 自动选择成功！")
+        return True
+    else:
+        print("tier 选择失败，错误信息:", stderr)
+        print("输出:", stdout)
+        return False
 
-    # 检查目录是否存在
-    if not os.path.exists(log_dir):
-        print(f"错误：目录 {log_dir} 不存在！")
-        return
-
-    # 获取目录中的所有文件
-    try:
-        files = [f for f in glob.glob(os.path.join(log_dir, "*")) if os.path.isfile(f)]
-        if not files:
-            print(f"目录 {log_dir} 中没有日志文件！")
+def deploy_node():
+    """一键部署节点"""
+    clear_screen()
+    print("===== 一键部署节点 =====")
+    
+    steps = [
+        check_ipv6,
+        update_packages,
+        install_screen,
+        install_hyperspace,
+        source_bashrc,
+        start_screen_session,
+        start_aios_cli,
+        download_model,
+        hive_login,
+        hive_connect,
+        select_tier
+    ]
+    
+    for i, step_func in enumerate(steps):
+        success = step_func()
+        if not success:
+            print(f"\n第 {i+1} 步失败，部署中断！")
+            input("按回车键返回主菜单...")
             return
-
-        # 找到最近修改的文件
-        latest_file = max(files, key=os.path.getmtime)
-        latest_time = os.path.getmtime(latest_file)
-        from datetime import datetime
-        print(f"\n最近的日志文件: {os.path.basename(latest_file)}")
-        print(f"最后修改时间: {datetime.fromtimestamp(latest_time).strftime('%Y-%m-%d %H:%M:%S')}")
-
-        # 查看文件内容
-        print(f"\n文件内容 ({latest_file}):")
-        run_command(f"cat {latest_file}")
-
-    except Exception as e:
-        print(f"查询最近日志时出错: {str(e)}")
-
-
-def check_and_enable_ipv6():
-    """检查 IPv6 是否开启，未开启则启用并验证"""
-    # 检查 IPv6 状态
-    success, output = run_command("sysctl net.ipv6.conf.all.disable_ipv6")
-    if not success:
-        print("错误：无法检查 IPv6 状态，可能系统不支持 IPv6")
-        return
-
-    # 判断是否禁用
-    ipv6_disabled = "net.ipv6.conf.all.disable_ipv6 = 1" in output
-    if not ipv6_disabled:
-        print("IPv6 已开启，检查可用性...")
-        success, addr_output = run_command("ip -6 addr")
-        if "inet6" in addr_output:
-            print("IPv6 已启用并有地址分配")
-        else:
-            print("IPv6 已启用但无地址，可能网络未配置")
-        return
-
-    print("IPv6 当前被禁用，正在启用...")
-
-    # 临时启用 IPv6
-    if run_command("sysctl -w net.ipv6.conf.all.disable_ipv6=0")[0]:
-        print("IPv6 已临时启用")
+    
+    print("\n第十三步: 部署完成！")
+    print("恭喜！节点部署成功！")
+    
+    # 执行 aios-cli hive whoami 并显示输出
+    print("\n正在获取节点密钥信息...")
+    stdout, stderr, code = run_command("aios-cli hive whoami")
+    if code == 0:
+        print("\n密钥信息:")
+        print(stdout)
     else:
-        print("临时启用 IPv6 失败，请检查权限或系统配置")
-        return
+        print("获取节点密钥失败，错误信息:", stderr)
+    
+    input("按回车键返回主菜单...")
 
-    # 永久启用 IPv6（修改 sysctl.conf）
+def check_points():
+    """查看积分"""
+    clear_screen()
+    print("===== 查看积分 =====")
+    stdout, stderr, code = run_command("aios-cli hive points")
+    if code == 0:
+        print("\n积分信息:")
+        print(stdout)
+    else:
+        print("获取积分失败，错误信息:", stderr)
+    
+    input("按回车键返回主菜单...")
+
+def check_logs():
+    """查看最新日志"""
+    clear_screen()
+    print("===== 查看最新日志 =====")
+    
+    # 获取日志目录中的所有文件
+    stdout, stderr, code = run_command("ls -t ~/.cache/hyperspace/kernel-logs")
+    
+    if code != 0:
+        print("无法获取日志文件列表，错误信息:", stderr)
+        input("按回车键返回主菜单...")
+        return
+    
+    # 获取最新的日志文件
+    log_files = stdout.strip().split('\n')
+    if not log_files or log_files[0] == '':
+        print("未找到日志文件")
+        input("按回车键返回主菜单...")
+        return
+    
+    latest_log = log_files[0]
+    print(f"正在显示最新日志文件: {latest_log}")
+    
+    # 显示最新日志文件的内容
+    stdout, stderr, code = run_command(f"cat ~/.cache/hyperspace/kernel-logs/{latest_log}")
+    
+    if code == 0:
+        print("\n日志内容:")
+        print(stdout)
+    else:
+        print("无法读取日志文件，错误信息:", stderr)
+    
+    input("按回车键返回主菜单...")
+
+    
+def monitor_node():
+    """监控节点"""
+    clear_screen()
+    print("===== 节点监控中 =====")
+    print("每半小时检查一次积分，如果3小时内积分未变化将自动重启节点")
+    
+    points_history = []  # 存储最近6次的积分记录
+    
     try:
-        with open("/etc/sysctl.conf", "r") as f:
-            lines = f.readlines()
-
-        disable_line = "net.ipv6.conf.all.disable_ipv6"
-        updated = False
-        for i, line in enumerate(lines):
-            if disable_line in line:
-                lines[i] = "net.ipv6.conf.all.disable_ipv6 = 0\n"
-                updated = True
-                break
-
-        if not updated:
-            lines.append("\n# Enable IPv6\n")
-            lines.append("net.ipv6.conf.all.disable_ipv6 = 0\n")
-
-        with open("/etc/sysctl.conf", "w") as f:
-            f.writelines(lines)
-
-        if run_command("sysctl -p")[0]:
-            print("IPv6 已永久启用，重启后生效")
-        else:
-            print("应用 sysctl 配置失败")
-
-    except Exception as e:
-        print(f"修改 IPv6 配置时出错: {str(e)}")
-        return
-
-    # 验证 IPv6 是否生效
-    print("验证 IPv6 是否可用...")
-    success, addr_output = run_command("ip -6 addr")
-    if success and "inet6" in addr_output:
-        print("IPv6 已启用并有地址分配")
-    else:
-        print("IPv6 已启用但无地址，可能网络未配置 IPv6 支持")
-        # 可选：尝试触发网络重新配置
-        run_command("service networking restart || systemctl restart networking")
-
-
-
-
-def menu():
-    """显示菜单选项"""
-    print("\n=== 脚本菜单 ===")
-    print("1. 一键部署节点 ")
-    print("2. 查看运行日志")
-    print("3. 查看积分")
-    print("4. 检测并启用 ipv6")
-    print("5. 退出脚本")
-    print("=====================")
-
-
-def main():
-    while True:
-        # 显示菜单
-        menu()
-
-        # 获取用户输入
-        choice = input("请输入选项 (1-5): ").strip()
-
-        # 根据输入执行操作
-        if choice == "1":
-            print("正在更新软件包...")
-            run_command("sudo apt update")
-            print("正在安装 screen...")
-            run_command("sudo apt install -y screen")
-            print("正在下载并安装 hyperspace...")
-            run_command("curl https://download.hyper.space/api/install | bash")
-            print("正在刷新 bashrc...")
-            # source 需要在 bash 中执行
-            run_command("bash -c 'source /root/.bashrc && echo bashrc refreshed'")
-            print("正在创建hyper会话...")
-            run_command("screen -S hyperspace")
-            print("正在更新软件包...")
-            run_command("sudo apt update")
-            print("正在启动aios-cli...")
-            run_command("aios-cli start")
-            print("正在启动 screen 会话并分离...")
-            # 用 -d -m 启动一个分离的 screen 会话，并在其中跑一个命令
-            run_command("screen -d -m bash -c 'echo Running in screen; sleep 1000'")
-            print("Screen 会话已启动并分离，可用 'screen -r' 重新连接")
-
-            print("正在安装模型...")
-            run_command("aios-cli models add hf:TheBloke/phi-2-GGUF:phi-2.Q4_K_M.gguf")
-
-            print("请粘贴你的秘钥：")
-            content = input().strip()
-            # 检查长度是否为44位
-            if len(content) == 44:
-                save_to_pem(content, "my.pem")
+        while True:
+            # 获取当前积分
+            stdout, stderr, code = run_command("aios-cli hive points")
+            if code == 0:
+                # 提取Points值
+                for line in stdout.split('\n'):
+                    if "Points:" in line:
+                        current_points = line.split(':')[1].strip()
+                        points_history.append(current_points)
+                        print(f"\n当前时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                        print(f"当前积分: {current_points}")
+                        
+                        # 保持最近6次记录（3小时）
+                        if len(points_history) > 6:
+                            points_history.pop(0)
+                        
+                        # 检查是否3小时内积分未变化
+                        if len(points_history) == 6 and len(set(points_history)) == 1:
+                            print("\n警告：积分3小时未变化，正在重启节点...")
+                            
+                            # 执行kill命令
+                            run_command("aios-cli kill")
+                            print("节点已停止")
+                            
+                            # 按顺序执行恢复步骤
+                            steps = [
+                                (start_aios_cli, "启动节点"),
+                                (hive_login, "登录hive"),
+                                (hive_connect, "连接hive"),
+                                (select_tier, "选择tier")
+                            ]
+                            
+                            for step_func, step_name in steps:
+                                print(f"\n正在{step_name}...")
+                                success = step_func()
+                                if not success:
+                                    print(f"{step_name}失败，将在下次检查时重试")
+                                    break
+                            else:
+                                print("\n恢复节点运行成功！")
+                            
+                            # 清空历史记录
+                            points_history.clear()
             else:
-                print(f"错误：输入长度为 {len(content)} 位，必须是 44 位！")
+                print(f"\n获取积分失败: {stderr}")
+            
+            # 等待30分钟
+            time.sleep(1800)
+            
+    except KeyboardInterrupt:
+        print("\n监控已停止")
+        input("按回车键返回主菜单...")
 
-            print("正在导入秘钥...")
-            run_command("aios-cli hive import-keys ./my.pem")
-
-            print("正在设置此会话...")
-            run_command("aios-cli hive login")
-
-            print("正在确认模型是否注册...")
-            run_command("aios-cli hive connect")
-
-            print("正在自动分配等级...")
-            run_command("aios-cli hive select-tier 5")
-
-            print("节点已部署成功...")
-
-
-
-
+def main_menu():
+    """主菜单"""
+    while True:
+        clear_screen()
+        print("===== HyperSpace 节点部署工具 =====")
+        print("1. 一键部署节点")
+        print("2. 查看积分")
+        print("3. 查看最新日志")
+        print("4. 监控节点")
+        print("0. 退出")
+        
+        choice = input("\n请选择操作 [0-4]: ")
+        
+        if choice == "1":
+            deploy_node()
         elif choice == "2":
-            print("正在查询最近日志...")
-            view_latest_log()
-
-
-
+            check_points()
         elif choice == "3":
-            print("正在查询积分...")
-            run_command("aios-cli hive points")
-
-
-
+            check_logs()
         elif choice == "4":
-            print("正在检查ipv6是否正常...")
-            check_and_enable_ipv6()
-
-
-        elif choice == "5":
-            print("退出脚本， bye!")
+            monitor_node()
+        elif choice == "0":
+            print("感谢使用，再见！")
             sys.exit(0)
-
         else:
-            print("无效选项，请输入 1-5 之间的数字！")
-
-        # 询问是否继续
-        cont = input("\n继续操作？(y/n): ").lower()
-        if cont != "y":
-            print("退出脚本， bye!")
-            break
-
+            print("无效选择，请重试！")
+            time.sleep(1)
 
 if __name__ == "__main__":
-    print("欢迎使用hyperspaceai一键部署脚本！-by 马走日")
-    print("X链接：https://x.com/erlili359891?t=ePrUNye3t75fBsTvO7QRVQ&s=09")
-    print("注意！！请先检查ipv6是否启用")
-    main()
+    try:
+        main_menu()
+    except KeyboardInterrupt:
+        print("\n程序被用户中断")
+        sys.exit(0)
+        
