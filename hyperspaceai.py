@@ -5,6 +5,8 @@ import os
 import subprocess
 import time
 import sys
+import shutil
+import select
 
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -84,25 +86,50 @@ def install_screen():
 def install_hyperspace():
     """安装 hyperspace"""
     print("\n第四步: 安装 hyperspace...")
-    stdout, stderr, code = run_command("curl https://download.hyper.space/api/install | bash")
-    if code == 0:
-        print("hyperspace 安装成功！")
-        return True
-    else:
-        print("hyperspace 安装失败，错误信息:", stderr)
+    
+    try:
+        # 使用os.system直接执行命令，这样输出会直接显示在控制台
+        return_code = os.system("curl https://download.hyper.space/api/install | bash")
+        
+        if return_code == 0:
+            print("hyperspace 安装成功！")
+            return True
+        else:
+            print("hyperspace 安装失败，返回码:", return_code)
+            return False
+    except Exception as e:
+        print(f"安装 hyperspace 时发生错误: {e}")
         return False
+
 
 def source_bashrc():
     """执行 source /root/.bashrc"""
     print("\n第五步: 加载环境变量...")
-    # 由于 source 是 shell 内置命令，我们需要特殊处理
-    stdout, stderr, code = run_command("bash -c 'source /root/.bashrc && echo 环境变量加载成功'")
-    if "环境变量加载成功" in stdout:
-        print("环境变量加载成功！")
-        return True
-    else:
-        print("环境变量加载失败，错误信息:", stderr)
-        return False
+    print("如果没有手动执行source /root/.bashrc 请按两次CTRL+c 退出程序。")
+    print("手动执行之后请重新运行脚本。")
+    print("如果已执行请等待15秒自动进入下一步。")
+    # 设置15秒计时
+    start_time = time.time()
+    while time.time() - start_time < 15:
+        try:
+            remaining = int(15 - (time.time() - start_time))
+            print(f"\r剩余时间: {remaining:2d} 秒", end="", flush=True)
+            # 使用select模块检查标准输入是否有数据可读
+            rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if rlist:  # 如果有输入
+                choice = input(" 输入1手动更新: ")
+                if choice == "1":
+                    print("\n请手动执行以下命令：")
+                    print("source /root/.bashrc")
+                    print("然后重新运行脚本")
+                    sys.exit(0)
+        except:
+            pass  # 忽略输入异常
+        time.sleep(0.1)
+    
+    print("\n15秒计时结束，自动继续...")
+    return True
+
 
 def start_screen_session():
     """启动 screen 会话"""
@@ -136,11 +163,7 @@ def start_aios_cli():
     print("\n第七步: 启动 aios-cli...")
     
     # 检查 aios-cli 是否已安装
-    stdout, stderr, code = run_command("command -v aios-cli")
-    if code != 0:
-        print("错误：aios-cli 未安装，请确保步骤 4 已正确执行")
-        return False
-    
+
     # 在 screen 会话中执行 aios-cli start
     stdout, stderr, code = run_command("screen -S hyperspace -X stuff 'aios-cli start\n'")
     
@@ -169,23 +192,25 @@ def start_aios_cli():
         print("向 screen 会话发送命令失败，错误信息:", stderr)
         return False
 
-
 def download_model():
     """下载模型"""
     print("\n第八步: 下载模型...")
     print("正在下载模型，请稍候...")
     
-    # 使用 os.system 直接执行命令，这样输出会直接显示在控制台上
     try:
-        # 直接执行命令，所有输出（包括进度条）都会显示在控制台
-        return_code = os.system("aios-cli models add hf:TheBloke/phi-2-GGUF:phi-2.Q4_K_M.gguf")
+        # 使用正确的 aios-cli 路径
+        return_code = os.system("/root/.aios/aios-cli models add hf:TheBloke/phi-2-GGUF:phi-2.Q4_K_M.gguf")
         
         if return_code == 0:
             print("模型下载成功！")
             return True
         else:
             print("模型下载失败，返回码:", return_code)
-            return False
+            # 提示用户手动下载
+            print("\n请尝试手动执行以下命令下载模型:")
+            print("/root/.aios/aios-cli models add hf:TheBloke/phi-2-GGUF:phi-2.Q4_K_M.gguf")
+            success = input("模型是否已成功下载? (y/n): ").lower() == 'y'
+            return success
     except Exception as e:
         print(f"下载模型时发生错误: {e}")
         return False
@@ -313,7 +338,7 @@ def check_logs():
     
     input("按回车键返回主菜单...")
 
-    
+
 def monitor_node():
     """监控节点"""
     clear_screen()
@@ -376,18 +401,36 @@ def monitor_node():
         print("\n监控已停止")
         input("按回车键返回主菜单...")
 
+def check_whoami():
+    """查看密钥信息"""
+    clear_screen()
+    print("===== 查看密钥信息 =====")
+    stdout, stderr, code = run_command("/root/.aios/aios-cli hive whoami")
+    if code == 0:
+        print("\n密钥信息:")
+        print(stdout)
+    else:
+        print("获取密钥信息失败，错误信息:", stderr)
+        print("输出:", stdout)
+    
+    input("按回车键返回主菜单...")
+
 def main_menu():
     """主菜单"""
     while True:
         clear_screen()
         print("===== HyperSpace 节点部署工具 =====")
+        print("===== 作者：马走日 =====")
+        print("===== 故障反馈或者实时更新请关注X:@erlili359891 ===== ")
+        print("=======================================================")
         print("1. 一键部署节点")
         print("2. 查看积分")
         print("3. 查看最新日志")
         print("4. 监控节点")
+        print("5. 查看密钥信息")
         print("0. 退出")
         
-        choice = input("\n请选择操作 [0-4]: ")
+        choice = input("\n请选择操作 [0-5]: ")
         
         if choice == "1":
             deploy_node()
@@ -397,6 +440,8 @@ def main_menu():
             check_logs()
         elif choice == "4":
             monitor_node()
+        elif choice == "5":
+            check_whoami()
         elif choice == "0":
             print("感谢使用，再见！")
             sys.exit(0)
@@ -410,4 +455,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n程序被用户中断")
         sys.exit(0)
-        
