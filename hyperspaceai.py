@@ -180,14 +180,9 @@ def start_aios_cli():
                 print("aios-cli 启动成功！")
                 return True
         
-        # 如果无法自动检测，询问用户
-        success = input("无法自动确认 aios-cli 是否启动成功，请手动确认 (y/n): ").lower() == 'y'
-        if success:
-            print("aios-cli 启动成功！")
-            return True
-        else:
-            print("aios-cli 启动失败！")
-            return False
+        # 无法自动检测时，直接假设成功并继续
+        print("无法自动确认 aios-cli 状态，假设启动成功并继续...")
+        return True
     else:
         print("向 screen 会话发送命令失败，错误信息:", stderr)
         return False
@@ -372,7 +367,7 @@ def monitor_node():
                             run_command("aios-cli kill")
                             print("节点已停止")
                             
-                            # 按顺序执行恢复步骤
+                            # 按顺序执行恢复步骤，使用与restart_node相同的逻辑
                             steps = [
                                 (start_aios_cli, "启动节点"),
                                 (hive_login, "登录hive"),
@@ -381,13 +376,15 @@ def monitor_node():
                             ]
                             
                             for step_func, step_name in steps:
-                                print(f"\n正在{step_name}...")
-                                success = step_func()
-                                if not success:
-                                    print(f"{step_name}失败，将在下次检查时重试")
-                                    break
-                            else:
-                                print("\n恢复节点运行成功！")
+                                while True:
+                                    print(f"\n正在{step_name}...")
+                                    success = step_func()
+                                    if success:
+                                        break
+                                    print(f"{step_name}失败，5秒后重试...")
+                                    time.sleep(5)
+                            
+                            print("\n节点重启成功！")
                             
                             # 清空历史记录
                             points_history.clear()
@@ -415,6 +412,36 @@ def check_whoami():
     
     input("按回车键返回主菜单...")
 
+def restart_node():
+    """重启节点"""
+    clear_screen()
+    print("===== 重启节点 =====")
+    
+    print("正在重启节点...")
+    # 执行kill命令
+    run_command("aios-cli kill")
+    print("节点已停止")
+    
+    # 按顺序执行恢复步骤
+    steps = [
+        (start_aios_cli, "启动节点"),
+        (hive_login, "登录hive"),
+        (hive_connect, "连接hive"),
+        (select_tier, "选择tier")
+    ]
+    
+    for step_func, step_name in steps:
+        while True:
+            print(f"\n正在{step_name}...")
+            success = step_func()
+            if success:
+                break
+            print(f"{step_name}失败，5秒后重试...")
+            time.sleep(5)
+    
+    print("\n节点重启成功！")
+    input("按回车键返回主菜单...")
+
 def main_menu():
     """主菜单"""
     while True:
@@ -427,10 +454,11 @@ def main_menu():
         print("2. 查看积分")
         print("3. 查看最新日志")
         print("4. 监控节点")
-        print("5. 查看密钥信息")
+        print("5. 重启节点")
+        print("6. 查看密钥信息")
         print("0. 退出")
         
-        choice = input("\n请选择操作 [0-5]: ")
+        choice = input("\n请选择操作 [0-6]: ")
         
         if choice == "1":
             deploy_node()
@@ -441,6 +469,8 @@ def main_menu():
         elif choice == "4":
             monitor_node()
         elif choice == "5":
+            restart_node()
+        elif choice == "6":
             check_whoami()
         elif choice == "0":
             print("感谢使用，再见！")
